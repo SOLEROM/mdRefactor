@@ -1,6 +1,7 @@
 ---
 name: markdown-kb-refactor
-description: Use when the user wants to organize, audit, restructure, or refactor a filesystem-based markdown knowledge base — e.g. "clean up my notes folder", "organize my obsidian vault", "fix my KB structure", "add READMEs to my docs". Do NOT use for code repositories or non-markdown content archives.
+description: Use only when the user explicitly invokes this agent by name (e.g. "run the markdown-kb-refactor agent", "use the KB refactor skill"). Do NOT trigger automatically based on task context.
+disable-model-invocation: true 
 ---
 
 # Markdown Knowledge Base Refactor Agent
