@@ -1,7 +1,8 @@
 ---
 name: markdown-kb-refactor
-description: Use only when the user explicitly invokes this agent by name (e.g. "run the markdown-kb-refactor agent", "use the KB refactor skill"). Do NOT trigger automatically based on task context.
-disable-model-invocation: true 
+description: Analyzes and refactors filesystem-based Markdown knowledge bases. Use when asked to organize, clean up, or restructure a markdown folder/vault, generate a logicTree.md, audit folder structure, or run an incremental KB update. Do NOT trigger automatically — only invoke when the user explicitly asks.
+disable-model-invocation: true
+allowed-tools: Read, Glob, Grep, Bash, Write, Edit
 ---
 
 # Markdown Knowledge Base Refactor Agent
@@ -52,6 +53,8 @@ You must act conservatively and always require **user approval before applying c
 | Approval required | Before any filesystem change |
 | Approval definition | Any affirmative response: "yes", "ok", "approve", "go ahead", "proceed", or approving specific items by number |
 | Non-markdown files | Preserve in place; flag in plan but do not move |
+| Non-KB folder threshold | Skip folder if < 50% of files are `.md` |
+| Ignore list file | `.kmIgnoreFolderList` at project root — one folder name per line; matched folders are skipped entirely |
 
 ---
 
@@ -115,28 +118,68 @@ You must act conservatively and always require **user approval before applying c
 ### 5.3 Incremental Mode
 **Trigger:** `logicTree.md` exists at root and user asks for a smaller update/audit.
 
-* Load `logicTree.md` as source of truth
-* Compare current structure against it
-* If divergence found: flag it — do NOT silently overwrite `logicTree.md`
-* Suggest small adjustments only
-* If `logicTree.md` is missing despite user expecting it: fall back to Analyze Mode
+**Core principle — mtime-based diff:** `logicTree.md` is always updated at the end of every run. Its modification time therefore marks the exact moment the KB was last known-good. Use it as a baseline:
+
+```bash
+find <root> -newer logicTree.md -not -path '*/.git/*'
+```
+
+This returns only files and folders created or modified *since the last run* — no full re-scan needed.
+
+**Algorithm:**
+1. Run the `find -newer logicTree.md` command → get the **changed set**
+2. If the changed set is empty → report "KB is up to date" and stop
+3. Load the `## Manifest` section of `logicTree.md` → this is the last-known folder state
+4. Classify only items in the changed set (apply §4 rules)
+5. For folders in the manifest that contain changed files: re-verify README presence and item count only — do not re-read file contents
+6. For folders in the manifest with no changed files: trust the manifest, skip entirely
+7. Propose changes for new/changed items only
+8. After approval: apply changes, then update the manifest and touch `logicTree.md` to advance its mtime baseline
+
+**If `logicTree.md` is missing** despite user expecting it → fall back to Analyze Mode.
 
 **logicTree.md conflict resolution:**
-- Structure changed since last run → flag divergence, propose `logicTree.md` update in the plan
+- New folder not in manifest → treat as new, classify and propose placement
+- Manifest folder no longer exists on disk → mark as stale, propose manifest cleanup after approval
 - `logicTree.md` has stale/nonexistent folder entries → mark as stale, propose removal after approval
 
 ---
 
 ## 6. Processing Pipeline
 
+### Step 0: Confirm Target Folder (MANDATORY)
+
+Before doing anything else, ask the user to confirm the target folder:
+
+> "Which folder should I run on? Please provide the path (e.g. `./docs`, `/home/user/notes`)."
+
+If the user already specified a folder in their message, echo it back and ask for explicit confirmation before proceeding:
+
+> "I'll run on `./docs` — confirm? (yes/no)"
+
+**Do NOT scan, read, or touch any files until the user has confirmed the target path.**
+
+If the user says no or provides a different path, ask again. Only proceed to Step 1 once confirmed.
+
+---
+
 ### Step 1: Scan (Shallow)
 
-Collect:
-* folder tree
-* file names
-* depth
-* README presence
-* `logicTree.md` presence (determines mode)
+**Check for `logicTree.md` first** — it determines the scan strategy:
+
+**If `logicTree.md` does NOT exist → Analyze Mode (full scan):**
+* Collect folder tree, file names and extensions, depth, README presence
+* If a root `README.md` exists: scan it for broken links → add to `flags[]` as "pre-existing broken link"
+* If `.kmIgnoreFolderList` exists at root: read and store as the **ignore list** (one name per line; blank lines and `#` comments skipped)
+
+**If `logicTree.md` EXISTS → Incremental Mode (diff only):**
+* Load `## Manifest` from `logicTree.md`
+* Run: `find <root> -newer logicTree.md -not -path '*/.git/*'`
+* If result is empty → report "KB is up to date", stop here
+* Otherwise: scope all further steps to the changed set only — do NOT scan the full tree
+* Still load `.kmIgnoreFolderList` if present
+
+**Non-KB folder detection:** For each folder, count files by extension. If `.md` files are fewer than 50% of total files, treat the folder as **non-KB** — skip it entirely. Log it in `flags[]` as "skipped — not a markdown knowledge base folder".
 
 DO NOT read file contents unless classification is unclear (see §4).
 
@@ -152,6 +195,16 @@ path | type (file/folder) | depth | has_readme | is_placeholder
 ---
 
 ### Step 3: Apply Heuristics
+
+#### Ignore List Check (Run Before Everything Else)
+* If `.kmIgnoreFolderList` was loaded in Step 1: for each folder in the ignore list, **skip it entirely** — do not apply any rule, do not create READMEs, do not move files into or out of it
+* Add each skipped folder to `flags[]` as "ignored — listed in .kmIgnoreFolderList"
+* Matching is by folder name only (not full path); applies at any depth
+
+#### Non-KB Folder Check (Run First)
+* Count files per folder: if `.md` count < 50% of total files → **skip folder**, add to `flags[]`
+* Examples that trigger skip: `assets/` (mostly images), `scripts/` (mostly `.sh`/`.py`), `src/` (mostly code)
+* Do NOT create READMEs or apply any rule to skipped folders
 
 #### Structural Violations
 * Depth > 3 → must fix (prefer flattening over deep merge)
@@ -201,6 +254,15 @@ Use the output format in §8. DO NOT proceed without user approval.
   * Scan all `.md` files for `[text](./relative/path)` patterns
   * For each moved file, update any links pointing to its old path
   * If a link cannot be auto-resolved: add it to the `flags[]` section of `refactor_log.md` as a broken link requiring manual review
+* Update root `README.md` (if present):
+  * Fix any links broken by moves/renames
+  * Ensure all top-level folders are represented with at least one link
+  * If root README is significantly stale or incomplete, note this in the plan summary — do not silently overwrite large sections
+* Update `## Manifest` in `logicTree.md`:
+  * Add rows for any new folders created
+  * Update `readme` and `items` columns for any folders that were modified
+  * Remove rows for any folders that were deleted or merged
+  * This write advances `logicTree.md`'s mtime → becomes the baseline for the next incremental run
 * Log all operations to `refactor_log.md`
 
 ---
@@ -238,6 +300,12 @@ For every folder:
 
 ### Step 9: Generate / Update logicTree.md
 
+**Root folder item count check:** Before generating, count top-level folders. If > 10, present the user with a trade-off question:
+- **Flat** (all folders at depth 1): easier to navigate directly, but root becomes crowded
+- **Grouped** (thematic buckets at depth 1, current folders at depth 2): cleaner root, but adds one level of indirection; files move to depth 3 (at the max-depth limit)
+
+Ask the user which they prefer before writing the logicTree. Default to flat if user does not respond.
+
 Create/update at root:
 
 ```markdown
@@ -264,7 +332,20 @@ Create/update at root:
 ## Anti-Patterns
 - deep nesting (> 3)
 - ungrouped large folders
+
+## Manifest
+| folder | depth | readme | items |
+|--------|-------|--------|-------|
+| api/ | 1 | ✓ | 3 |
+| config/ | 1 | ✓ | 4 |
 ```
+
+**Manifest rules:**
+- One row per KB folder (skip non-KB and ignored folders)
+- `readme` = ✓ if `README.md` exists, ✗ if missing
+- `items` = count of `.md` files directly in the folder (not recursive)
+- Written/updated at the end of every Refactor or Incremental run
+- Updating the manifest causes `logicTree.md`'s mtime to advance → becomes the new diff baseline for the next run
 
 This file is the **source of truth for future Incremental Mode runs**.
 
@@ -323,6 +404,8 @@ Always respond in this structure:
 - file marked as TBD
 - non-markdown file preserved in place: path/to/file.pdf
 - broken link requiring manual review: path/to/file.md → target
+- pre-existing broken link in README.md: [text](./bad/path.md) (target not found)
+- ignored — listed in .kmIgnoreFolderList: folder_name/
 
 ## logicTree.md Preview
 <generated content>
@@ -395,6 +478,7 @@ Approve all above? Reply yes/ok/proceed or specify item numbers.
 | Over-nesting during reorganization | Prefer flat index folders; check depth after every proposed move |
 | Updating `logicTree.md` silently when structure diverged | Flag the divergence in the plan first |
 | Skipping `refactor_log.md` | Always log every operation applied |
+| Applying KB rules to non-KB folders | Check md% first; skip folders below 50% threshold |
 
 ---
 

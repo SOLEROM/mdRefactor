@@ -1,0 +1,2 @@
+# Folders listed here will be skipped by the KB refactor agent.
+vendor
