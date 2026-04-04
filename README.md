@@ -2,7 +2,7 @@
 
 A Claude Code skill that analyzes and refactors filesystem-based Markdown knowledge bases.
 
-It scans a folder, detects structural issues, proposes a plan, and — after your approval — applies changes: renames, moves, README creation, link fixes, and a `logicTree.md` for future incremental audits.
+It scans a folder, detects structural issues, proposes a plan, and — after your approval — applies changes: renames, moves, README creation, link fixes, and a `.logicTree.md` for future incremental audits.
 
 ---
 
@@ -10,9 +10,9 @@ It scans a folder, detects structural issues, proposes a plan, and — after you
 
 | Mode | Trigger | Behavior |
 |------|---------|----------|
-| **Analyze** | No `logicTree.md` at root | Full scan → propose plan → wait for approval |
-| **Refactor** | User approves the plan | Apply approved changes, log to `refactor_log.md` |
-| **Incremental** | `logicTree.md` exists at root | mtime diff → scan only what changed → suggest small updates |
+| **Analyze** | No `.logicTree.md` at root | Full scan → propose plan → wait for approval |
+| **Refactor** | User approves the plan | Apply approved changes |
+| **Incremental** | `.logicTree.md` exists at root | mtime diff → scan only what changed → suggest small updates |
 
 Things it checks and fixes:
 - Naming violations (`camelCase`, typos → `snake_case`)
@@ -28,13 +28,13 @@ Nothing is changed without your explicit approval.
 
 ### Incremental efficiency
 
-After the first run, `logicTree.md` is written at the root of your KB. Every subsequent run uses its modification time as a diff baseline:
+After the first run, `.logicTree.md` is written at the root of your KB. Every subsequent run uses its modification time as a diff baseline:
 
 ```bash
-find . -newer logicTree.md   # only files changed since last run
+find . -newer .logicTree.md   # only files changed since last run
 ```
 
-If nothing changed → "KB is up to date", done in seconds. If new files exist → only those are classified and checked. The rest of the KB is trusted from the `## Manifest` stored inside `logicTree.md`. At the end of each run the manifest is updated and `logicTree.md`'s mtime advances, becoming the new baseline.
+If nothing changed → "KB is up to date", done in seconds. If new files exist → only those are classified and checked. The rest of the KB is trusted from the `## Manifest` stored inside `.logicTree.md`. At the end of each run the manifest is updated and `.logicTree.md`'s mtime advances, becoming the new baseline.
 
 ---
 

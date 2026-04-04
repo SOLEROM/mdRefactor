@@ -1,6 +1,6 @@
 ---
 name: markdown-kb-refactor
-description: Analyzes and refactors filesystem-based Markdown knowledge bases. Use when asked to organize, clean up, or restructure a markdown folder/vault, generate a logicTree.md, audit folder structure, or run an incremental KB update. Do NOT trigger automatically — only invoke when the user explicitly asks.
+description: Analyzes and refactors filesystem-based Markdown knowledge bases. Use when asked to organize, clean up, or restructure a markdown folder/vault, generate a .logicTree.md, audit folder structure, or run an incremental KB update. Do NOT trigger automatically — only invoke when the user explicitly asks.
 disable-model-invocation: true
 allowed-tools: Read, Glob, Grep, Bash, Write, Edit
 ---
@@ -30,8 +30,8 @@ You must act conservatively and always require **user approval before applying c
 - User asks to organize, clean up, or restructure a markdown folder/vault
 - A folder has no README.md
 - Files appear misplaced or folder names are inconsistent
-- User wants a `logicTree.md` generated or updated
-- User invokes Incremental Mode on a KB that already has a `logicTree.md`
+- User wants a `.logicTree.md` generated or updated
+- User invokes Incremental Mode on a KB that already has a `.logicTree.md`
 
 ### Do NOT use when:
 - The root folder is a code repository (has `package.json`, `go.mod`, `Cargo.toml`, etc.)
@@ -96,7 +96,7 @@ You must act conservatively and always require **user approval before applying c
 ## 5. Operating Modes
 
 ### 5.1 Analyze Mode (Default)
-**Trigger:** No `logicTree.md` exists at root, or user explicitly asks for a full scan.
+**Trigger:** No `.logicTree.md` exists at root, or user explicitly asks for a full scan.
 
 * Scan structure
 * Detect issues
@@ -109,39 +109,38 @@ You must act conservatively and always require **user approval before applying c
 **Trigger:** User has approved a plan from Analyze Mode.
 
 * Execute only approved changes
-* Log all operations to `refactor_log.md` in root
 * Before applying: suggest user run `git add -A && git commit -m "pre-refactor snapshot"` if repo is git-tracked
-* After applying: update `logicTree.md` and all affected `README.md` files
+* After applying: update `.logicTree.md` and all affected `README.md` files
 
 ---
 
 ### 5.3 Incremental Mode
-**Trigger:** `logicTree.md` exists at root and user asks for a smaller update/audit.
+**Trigger:** `.logicTree.md` exists at root and user asks for a smaller update/audit.
 
-**Core principle — mtime-based diff:** `logicTree.md` is always updated at the end of every run. Its modification time therefore marks the exact moment the KB was last known-good. Use it as a baseline:
+**Core principle — mtime-based diff:** `.logicTree.md` is always updated at the end of every run. Its modification time therefore marks the exact moment the KB was last known-good. Use it as a baseline:
 
 ```bash
-find <root> -newer logicTree.md -not -path '*/.git/*'
+find <root> -newer .logicTree.md -not -path '*/.git/*'
 ```
 
 This returns only files and folders created or modified *since the last run* — no full re-scan needed.
 
 **Algorithm:**
-1. Run the `find -newer logicTree.md` command → get the **changed set**
+1. Run the `find -newer .logicTree.md` command → get the **changed set**
 2. If the changed set is empty → report "KB is up to date" and stop
-3. Load the `## Manifest` section of `logicTree.md` → this is the last-known folder state
+3. Load the `## Manifest` section of `.logicTree.md` → this is the last-known folder state
 4. Classify only items in the changed set (apply §4 rules)
 5. For folders in the manifest that contain changed files: re-verify README presence and item count only — do not re-read file contents
 6. For folders in the manifest with no changed files: trust the manifest, skip entirely
 7. Propose changes for new/changed items only
-8. After approval: apply changes, then update the manifest and touch `logicTree.md` to advance its mtime baseline
+8. After approval: apply changes, then update the manifest and touch `.logicTree.md` to advance its mtime baseline
 
-**If `logicTree.md` is missing** despite user expecting it → fall back to Analyze Mode.
+**If `.logicTree.md` is missing** despite user expecting it → fall back to Analyze Mode.
 
-**logicTree.md conflict resolution:**
+**.logicTree.md conflict resolution:**
 - New folder not in manifest → treat as new, classify and propose placement
 - Manifest folder no longer exists on disk → mark as stale, propose manifest cleanup after approval
-- `logicTree.md` has stale/nonexistent folder entries → mark as stale, propose removal after approval
+- `.logicTree.md` has stale/nonexistent folder entries → mark as stale, propose removal after approval
 
 ---
 
@@ -165,16 +164,16 @@ If the user says no or provides a different path, ask again. Only proceed to Ste
 
 ### Step 1: Scan (Shallow)
 
-**Check for `logicTree.md` first** — it determines the scan strategy:
+**Check for `.logicTree.md` first** — it determines the scan strategy:
 
-**If `logicTree.md` does NOT exist → Analyze Mode (full scan):**
+**If `.logicTree.md` does NOT exist → Analyze Mode (full scan):**
 * Collect folder tree, file names and extensions, depth, README presence
 * If a root `README.md` exists: scan it for broken links → add to `flags[]` as "pre-existing broken link"
 * If `.kmIgnoreFolderList` exists at root: read and store as the **ignore list** (one name per line; blank lines and `#` comments skipped)
 
-**If `logicTree.md` EXISTS → Incremental Mode (diff only):**
-* Load `## Manifest` from `logicTree.md`
-* Run: `find <root> -newer logicTree.md -not -path '*/.git/*'`
+**If `.logicTree.md` EXISTS → Incremental Mode (diff only):**
+* Load `## Manifest` from `.logicTree.md`
+* Run: `find <root> -newer .logicTree.md -not -path '*/.git/*'`
 * If result is empty → report "KB is up to date", stop here
 * Otherwise: scope all further steps to the changed set only — do NOT scan the full tree
 * Still load `.kmIgnoreFolderList` if present
@@ -253,17 +252,16 @@ Use the output format in §8. DO NOT proceed without user approval.
 * Update internal markdown links:
   * Scan all `.md` files for `[text](./relative/path)` patterns
   * For each moved file, update any links pointing to its old path
-  * If a link cannot be auto-resolved: add it to the `flags[]` section of `refactor_log.md` as a broken link requiring manual review
+  * If a link cannot be auto-resolved: add it to `flags[]` as a broken link requiring manual review
 * Update root `README.md` (if present):
   * Fix any links broken by moves/renames
   * Ensure all top-level folders are represented with at least one link
   * If root README is significantly stale or incomplete, note this in the plan summary — do not silently overwrite large sections
-* Update `## Manifest` in `logicTree.md`:
+* Update `## Manifest` in `.logicTree.md`:
   * Add rows for any new folders created
   * Update `readme` and `items` columns for any folders that were modified
   * Remove rows for any folders that were deleted or merged
-  * This write advances `logicTree.md`'s mtime → becomes the baseline for the next incremental run
-* Log all operations to `refactor_log.md`
+  * This write advances `.logicTree.md`'s mtime → becomes the baseline for the next incremental run
 
 ---
 
@@ -298,7 +296,7 @@ For every folder:
 
 ---
 
-### Step 9: Generate / Update logicTree.md
+### Step 9: Generate / Update .logicTree.md
 
 **Root folder item count check:** Before generating, count top-level folders. If > 10, present the user with a trade-off question:
 - **Flat** (all folders at depth 1): easier to navigate directly, but root becomes crowded
@@ -309,7 +307,7 @@ Ask the user which they prefer before writing the logicTree. Default to flat if 
 Create/update at root:
 
 ```markdown
-# logicTree.md
+# .logicTree.md
 
 ## Structure Principles
 - max_depth: 3
@@ -345,7 +343,7 @@ Create/update at root:
 - `readme` = ✓ if `README.md` exists, ✗ if missing
 - `items` = count of `.md` files directly in the folder (not recursive)
 - Written/updated at the end of every Refactor or Incremental run
-- Updating the manifest causes `logicTree.md`'s mtime to advance → becomes the new diff baseline for the next run
+- Updating the manifest causes `.logicTree.md`'s mtime to advance → becomes the new diff baseline for the next run
 
 This file is the **source of truth for future Incremental Mode runs**.
 
@@ -407,7 +405,7 @@ Always respond in this structure:
 - pre-existing broken link in README.md: [text](./bad/path.md) (target not found)
 - ignored — listed in .kmIgnoreFolderList: folder_name/
 
-## logicTree.md Preview
+## .logicTree.md Preview
 <generated content>
 
 ## Questions for Approval
@@ -476,8 +474,7 @@ Approve all above? Reply yes/ok/proceed or specify item numbers.
 | Flattening a README-only folder with a clear topic name | Check the §7 disambiguation table; topic nodes are valid |
 | Moving non-markdown files | Preserve in place; only flag them |
 | Over-nesting during reorganization | Prefer flat index folders; check depth after every proposed move |
-| Updating `logicTree.md` silently when structure diverged | Flag the divergence in the plan first |
-| Skipping `refactor_log.md` | Always log every operation applied |
+| Updating `.logicTree.md` silently when structure diverged | Flag the divergence in the plan first |
 | Applying KB rules to non-KB folders | Check md% first; skip folders below 50% threshold |
 
 ---
@@ -510,8 +507,7 @@ A successful run results in:
 * Logical grouping via index folders
 * Full README coverage
 * Placeholder visibility (`TBD`)
-* Stable, maintainable system via `logicTree.md`
-* All operations logged in `refactor_log.md`
+* Stable, maintainable system via `.logicTree.md`
 
 ---
 
@@ -519,7 +515,7 @@ A successful run results in:
 
 When invoked:
 
-1. Check for `logicTree.md` at root → determines mode (Analyze vs Incremental)
+1. Check for `.logicTree.md` at root → determines mode (Analyze vs Incremental)
 2. Default to **Analyze Mode** if none found
 3. Produce full plan using §8 output format
 4. Wait for approval
